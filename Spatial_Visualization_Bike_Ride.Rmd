@@ -1,0 +1,727 @@
+---
+title: "Analysis of San Francisco Bike Rides"
+author: "Varnith"
+date: "30 November 2016"
+output: html_document
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+
+```
+
+
+##Loading the library
+
+```{r,results='hide',message=FALSE}
+
+x<-c('tidyverse','dplyr','jsonlite','httr','rvest','ggplot2','reshape','gtools','RCurl','lubridate','stringr','ggmap','leaflet','shiny','devtools','ggthemes','plotly','ggrepel','knitr')
+
+lapply(x,library,character.only=TRUE)
+
+
+
+```
+
+
+
+
+
+##Reading the Weather Data from wundergorund
+```{r}
+
+
+date.range <- seq.Date(from=as.Date('2013-08-01'), to=as.Date('2016-08-31'), by='1 day')
+
+for(i in seq_along(date.range)){
+a<-format(date.range[i],"%Y")
+b<-format(date.range[i],"%m")
+c<-format(date.range[i],"%d")
+
+t<-paste0("https://www.wunderground.com/history/airport/SFO","/",a,"/",b,"/",c,"/DailyHistory.html?&reqdb.zip=&reqdb.magic=&reqdb.wmo=&MR=1")
+
+url<-t %>% read_html() %>% html_nodes("table") %>% html_table(fill=TRUE) 
+
+if (date.range[i]=='2013-08-01'){
+x<-as.data.frame(url[[1]])
+names(x)[1]<-"Metrics"
+y <-c("Mean Temperature",	"Max Temperature",	"Min Temperature",	"Dew Point",	"Average Humidity",	"Maximum Humidity",	
+      "Minimum Humidity",	"Wind Speed",	"Max Wind Speed",	"Max Gust Speed",	"Visibility",	"Events")
+x<-x[x$Metrics %in% y ,1:2]
+d<-data.frame
+d<-cast(x,.~Metrics)
+d[,1]<-date.range[i]
+}
+
+else {
+  
+  x<-as.data.frame(url[[1]])
+  names(x)[1]<-"Metrics"
+  x<-x[x$Metrics %in% y ,1:2]
+  j<-data.frame
+  j<-cast(x,.~Metrics)
+  j[,1]<-date.range[i]
+  d<-smartbind(d,j)
+  
+}
+}
+
+kable(d[1:5,])
+
+
+```
+
+
+
+In this step I have extracted data from wunderground website over the period of three years starting from 31-August-2013(the date on which bike sharing began in the bay area) to 31-August-2016.
+Since I had difficulty in obtaining the API key for this I had to extract the data using html nodes. The daily weather data was present in different URLS. I wrote a sequence of dates which then I used to extarct the year ,month and date that could used in my url "t" .I had to re run this process for all the dates,so I wrote a 'for' loop which would do this over all the dates.
+
+I extracted some of the important parameters, from the website like - Mean Temperature,Humidity,Dew Point etc.Since the extracted data was in wide format so for ease converted this to long format, I used 'cast' function which works in the same manner as spread  function from the tidyverse package.
+
+Since I was getting information for every date,it made sense now to bind them,however rbind did not work as on many days there was some information missing.So I used a function called smartbind from gtools package, which would forcefully append.
+
+The final dataset 'd' contained 1127 observations of weather information.
+
+
+
+
+```{r,echo=FALSE}
+
+
+data_year3<-"https://s3.amazonaws.com/babs-open-data/babs_open_data_year_3.zip"
+temp_dir <- tempdir()
+tempfile <- tempfile(tmpdir = temp_dir, fileext = ".zip")
+download.file(data_year3, tempfile)
+f<-unzip(tempfile,list = TRUE)$Name[c(3,5)]
+unzip(tempfile,files = f,exdir = temp_dir, overwrite=TRUE)
+fpath <- file.path(temp_dir, f)
+data_status_201608 <- read.csv(fpath[1], header = TRUE, row.names=NULL, stringsAsFactors=FALSE)
+data_station_201608 <- read.csv(fpath[2], header = TRUE, row.names=NULL, stringsAsFactors=FALSE)
+data_station_201608 <- na.omit(data_station_201608)
+unlink(temp_dir)
+
+
+
+data_year2<-"https://s3.amazonaws.com/babs-open-data/babs_open_data_year_2.zip"
+temp_dir <- tempdir()
+tempfile <- tempfile(tmpdir = temp_dir, fileext = ".zip")
+download.file(data_year2,tempfile)
+f<-unzip(tempfile,list = TRUE)$Name[c(3,1)]
+unzip(tempfile,files=f,exdir=temp_dir, overwrite=TRUE)
+fpath <- file.path(temp_dir, f)
+data_status_201508 <-read.csv(fpath[1], header = TRUE, row.names = NULL, stringsAsFactors=FALSE)
+data_station_201508<-read.csv(fpath[2], header = TRUE, row.names = NULL, stringsAsFactors=FALSE)
+unlink(temp_dir)
+```
+
+
+##Reading the Bike Infromation
+```{r}
+
+data_year1<-"https://s3.amazonaws.com/babs-open-data/babs_open_data_year_1.zip"
+temp_dir <- tempdir()
+tempfile <- tempfile(tmpdir = temp_dir, fileext = ".zip")
+download.file(data_year1,tempfile)
+f<-unzip(tempfile,list = TRUE)$Name[c(8,10)]
+unzip(tempfile,files=f,exdir=temp_dir, overwrite=TRUE)
+fpath <- file.path(temp_dir, f)
+data_status_201408 <-read.csv(fpath[2], header = TRUE, row.names = NULL, stringsAsFactors = FALSE)
+data_station_201408<-read.csv(fpath[1], header = TRUE, row.names = NULL, stringsAsFactors = FALSE)
+unlink(temp_dir)
+
+
+final_trip_data<-rbind(data_status_201408,data_status_201508,data_status_201608)
+final_station_data<-rbind(data_station_201408,data_station_201508,data_station_201608)
+
+final_station_data<-final_station_data[!duplicated(final_station_data$name),]
+
+rm(data_status_201408,data_status_201508,data_status_201608)
+rm(data_station_201408,data_station_201508,data_station_201608)
+
+
+glimpse(final_trip_data)
+
+glimpse(final_station_data)
+
+```
+
+
+
+
+
+This was an interesting part as I wanted to extract data directly from the internet without saving the file locally on the system.So I created a tempfile and temp-directory on to which I downloaded 3 different files each time.I used "download.file" to download the data and then unzipped it.The Files that were present were-
+
+Station-Information-Containing the station name,Latitude,Longitude & landmrak(city).
+Trip-Information-Containing tripid,Start.Station,End.Station,Start & End time.
+
+Since I had 3 files of each type(due to three years) of the above two.I had to append the data sets one of the trips that were made and the other that information of the stations.The final two datasets were
+
+Final_Trip_data-Containing the trip information
+Final_Station_data-Containing all the stations
+
+The above code is the process what I did for one of the files.
+
+
+
+
+##Cleaning and  Tidying Data
+
+```{r}
+
+
+a<-c("Kearny","Mezes Park","5th S at E. San Salvador St","5th St at E. San Salvador St","S. Market St at Park Ave","Mezes")
+b<-c("Kearney","Mezes","5th S. at E. San Salvador St","5th S. at E. San Salvador St","S. Market st at Park Ave","Mezes Park")
+
+
+
+replace<-function(x){
+  
+  str_replace_all(x,a[i],b[i])
+  
+  
+}
+
+
+for( i in 1:length(a)){
+final_trip_data$End.Station<-replace(final_trip_data$End.Station)
+final_trip_data$Start.Station<-replace(final_trip_data$Start.Station)
+}
+
+
+
+```
+
+
+
+I need to merge the two final datasets containing the final trip and final station in order to get starting coordinates(latitude and longitude) ,as well as end coordinates for each station.As I wanted to do some spatial Visualization.
+
+The merge was to be made on station name.Some of the station names were not matching, for example in one the station name "kearny" and on another "Kearney".So I used regex operator to replace this,due to many stations which had this spell check issue,I made a simple function to replace it.
+
+
+
+
+
+
+
+##Merging the data
+
+```{r,echo=FALSE}
+
+
+
+final_trip_data$Start.Date<-strptime(final_trip_data$Start.Date,format = "%m/%d/%Y %H:%M")
+
+final_trip_data$Start_Time<-strftime(final_trip_data$Start.Date, format = "%H:%M") 
+
+final_trip_data$Start.Date<-as.Date(final_trip_data$Start.Date,format = "%m/%d/%Y")
+
+
+
+final_trip_data$End.Date<-strptime(final_trip_data$End.Date,format = "%m/%d/%Y %H:%M")
+
+final_trip_data$End_Time<-strftime(final_trip_data$End.Date, format = "%H:%M") 
+
+final_trip_data$End.Date<-as.Date(final_trip_data$End.Date,format = "%m/%d/%Y")
+
+
+
+final_trip_data<- merge(final_trip_data,final_station_data,by.x = "Start.Station",by.y = "name",all.x = T) %>% dplyr::rename(lat_start=lat,long_start=long) %>% merge(.,final_station_data[,c("lat","long","name","landmark")],by.x = "End.Station",by.y = "name",all.x = T) %>% dplyr::rename(lat_end=lat,long_end=long,landmark_end=landmark.y)
+
+
+
+```
+
+
+
+
+Now while merging I realised the formats of the date werent same in either dataset.So changed the format using strptime and then merged across the station name between trip data and stations data created above. Apart from the coordinates that were retained start city(landmark) and end city(landmark.y) were kept in the final data after merging.
+
+
+
+
+
+```{r,echo=FALSE}
+
+
+final_trip_data$Season <- ifelse(month(final_trip_data$Start.Date) %in% c("3", "4", "5"),"Spring",ifelse(month(final_trip_data$Start.Date) %in% c("6", "7", "8"),"Summer",ifelse(month(final_trip_data$Start.Date) %in% c("9", "10", "11"),"Fall", ifelse(month(final_trip_data$Start.Date) %in% c("12", "1", "2"),"Winter",0))))
+
+
+weekdays1 <- c('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday')
+
+
+final_trip_data$day <- factor((weekdays(final_trip_data$Start.Date) %in% weekdays1), 
+         levels=c(FALSE, TRUE), labels = c('weekend', 'weekday')) 
+
+
+
+final_trip_data$Season <- ifelse( month(final_trip_data$Start.Date ) %in% c( "3", "4", "5" ),"Spring",ifelse(month( final_trip_data$Start.Date ) %in% c( "6", "7", "8" ),"Summer",ifelse(month( final_trip_data$Start.Date ) %in% c( "9",  "10",  "11" ),"Fall", ifelse(month(final_trip_data$Start.Date) %in%  c( "12", "1", "2"),"Winter",0))))
+
+
+
+final_trip_data$hour<-strftime(strptime( final_trip_data$End_Time,format = "%H" ),format="%H")
+
+final_trip_data$Year<-year( final_trip_data$Start.Date )
+
+final_trip_data$month<-month( final_trip_data$Start.Date )
+
+```
+
+
+
+##Creating important variables-Distance
+```{r}
+earth.dist <- function (long1, lat1, long2, lat2)
+{
+rad <- pi/180
+a1 <- lat1 * rad
+a2 <- long1 * rad
+b1 <- lat2 * rad
+b2 <- long2 * rad
+dlon <- b2 - a2
+dlat <- b1 - a1
+a <- (sin(dlat/2))^2 + cos(a1) * cos(b1) * (sin(dlon/2))^2
+c <- 2 * atan2(sqrt(a), sqrt(1 - a))
+R <- 6378.145
+d <- R * c
+return(d)
+}
+
+
+final_trip_data$distance <- earth.dist(final_trip_data$long_start, final_trip_data$lat_start, final_trip_data$long_end, final_trip_data$lat_end)
+
+
+```
+
+
+
+Data analysis always requires one to look from beyond the scope of existing variables.So I created a few variables which I used later on in my analysis.I created the season variable based on the month of the year into four levels.This helped me understand the seasonal patterns in my data.
+
+Hour was a very important variable that would be good to see patterns in the data.Since this was not readily available made use of lubridate package which it made easy to get the year and month along with hour.
+
+Distance could also be factor while considering bike rides.The function above is the haversine formula to calculate the distance between two particular coordiantes.It returns the distance in miles.In all the final data contained ~ 800,000 observations indicating bicycle trips made and 28 variables containing the information.
+
+
+
+
+##Data Analysis-Monthly Bicycle Trips
+```{r,echo=FALSE}
+
+
+
+final_trip_data$Year<-as.character(final_trip_data$Year)
+
+final_trip_data$month<-as.factor(final_trip_data$month)
+
+final_trip_data %>%  select(Year,month) %>% group_by(Year,month) %>% count() %>% ggplot(.,aes(month,n,colour=Year,group=Year))+geom_point()+geom_line() + theme(plot.subtitle = element_text(vjust = 1), 
+    plot.caption = element_text(vjust = 1), 
+    plot.title = element_text(family = "serif", 
+        face = "italic"), panel.background = element_rect(fill = "lemonchiffon")) +labs(title = "Bicycle trips across months", 
+    x = "Month", y = "Bicycle_Trips") + theme(plot.title = element_text(hjust = 0.5)) + theme(plot.title = element_text(size = 14))
+
+
+
+
+```
+
+
+
+
+To Begin with lets the Bicycle trips that were made through the years and in each month.I noticed that bike sharing actually began from March 2014,not August 2013 mentioned on the website.Some of the very obvious facts, one can notice that the number of bicycle trips that were made went up during the months of summer and spring-maximum during the month of July which could be due to summer and large influx of tourists visiting the bay area during that period.
+
+However in July 2016 there was significant drop in trips made across the bay area.This was because the month had 5 weekends and also the Friday and Monday,before and after the July 4th Weekend didnt see many trips that were made.
+
+
+
+
+
+##Data Analysis-Average Trips across hour of day-Different Seasons
+
+```{r,echo=FALSE}
+##Average_Trips_Across_Seasons
+
+h<-final_trip_data %>% group_by(hour, Year, Season) %>% select(hour, Year, Season) %>% count() %>% group_by( hour, Season) %>% summarise( Average_Trips = mean(n))
+
+
+
+ggplot(h,mapping = aes(hour, Average_Trips)) + geom_col() + facet_grid( Season~.) + theme( plot.subtitle = element_text(vjust = 1), 
+    plot.caption = element_text(vjust = 1), 
+    axis.title = element_text(family = "serif", 
+        size = 12, face = "italic"), plot.title = element_text(family = "serif", 
+        face = "italic"), panel.background = element_rect(fill = "lemonchiffon")) +labs(title = "Bicycle_Count_Across_Seasons", 
+    x = "Hour_of_Day", y = " Average Bicycle Trips") + theme(plot.title = element_text(hjust = 0.5))
+
+
+rm(h)
+```
+
+
+
+I have put as much information as I could on the plottting the average bicycle trips in each season during the hour of the day.Noticeable were that the most trips were made at 8 & 9 in the morning and 5 & 6 in the evening,which could indicate people going to work were using.But this had to be confirmed.
+
+
+The average trips that were made decreased to almost zero after midnight.Since most of the stations were present around offices in cities of San Francisco,San Jose,Paolo Alto, so we dont see anyone making trips late night,maybe it is unsfae to use bike that late.
+
+
+
+
+##Data Analysis-Box Plot of Bicycle trips Across Seasons
+
+```{r,echo=FALSE}
+
+##Box_Plot_Seasons
+
+ggplot_a<- final_trip_data %>% group_by(hour, Season) %>% select(hour, Season) %>% count() %>%
+  ggplot(.,mapping = aes(Season,n,fill = Season)) + geom_boxplot() + theme(plot.subtitle = element_text(vjust = 1), 
+    plot.caption = element_text(vjust = 1), 
+    axis.title = element_text(family = "serif", 
+        size = 13, face = "italic"), plot.title = element_text(family = "serif", 
+        size = 15, face = "italic"), legend.text = element_text(face = "italic", 
+        family = "serif"), legend.title = element_text(size = 12, 
+        family = "serif"), panel.background = element_rect(fill = "lemonchiffon")) +labs(title = "Box_Plot", y = "Count_Of_Trips")+labs(title = "Box_Plot_of_Season_Trips")
+
+ggplotly(ggplot_a)
+
+```
+
+
+
+I wanted to look how these patterns were during each hour more closely.I made sure I made box plot test,which gives us good idea than the previous plot in terms of where the average number of trips lies and also at which hour were the least trips and at which hour the most were made during each season.
+
+During Winter the average trips that were made had gone down significantly during all the hours, winter saw half the number of trips being made compares to spring and summer.
+
+The best reason one can guess can be due to the fall in temperature.
+
+
+
+##Data Analysis-Weekday-Weekend/Subscriber-Customer
+
+```{r,echo=FALSE}
+##Subscriber-Customer-hour
+
+final_trip_data %>% group_by(Subscriber.Type, hour, day) %>% select(Subscriber.Type, hour) %>% count() %>% ggplot(.,mapping=aes( hour, n)) + geom_col() + facet_grid( day~.) + theme(plot.subtitle = element_text(vjust = 1), 
+    plot.caption = element_text(vjust = 1), 
+    panel.background = element_rect(fill = "lemonchiffon1")) + labs(x = "Hour_of_the_day", y = "Bicycle_Trips")+ theme(axis.text.x = element_text(angle = 25)) 
+
+
+
+final_trip_data %>% group_by(Subscriber.Type, hour, day) %>% select(Subscriber.Type, hour) %>% count() %>% ggplot(.,mapping=aes(hour,n)) + geom_col() + facet_grid( Subscriber.Type~.) + theme(plot.subtitle = element_text(vjust = 1), 
+    plot.caption = element_text(vjust = 1), 
+    panel.background = element_rect(fill = "lemonchiffon1")) +labs(x = "Hour_of_the_day", y = "Bicycle_Trips")+ theme(axis.text.x = element_text(angle = 25)) 
+
+
+```
+
+
+So looking at trips made during the Weekend vs Weekday could strengthen our previous hypothesis of people taking bikes to work or not.
+
+Plot1 shows that people were were travelling more during the weekday than weekend and most trips were made during early morning and evening hours.
+
+Plot2 shows that who were the people using the service.Most people who used this were Subscribers and cusotmers or ont time users hardly used.Could the two plots show that maybe customers were the weekend users?
+
+
+
+```{r,echo=FALSE}
+
+final_trip_data %>% group_by( Subscriber.Type, hour, day) %>% select( Subscriber.Type, hour, day) %>% count() %>% ggplot(.,mapping=aes(hour, n))+geom_col()+facet_grid(Subscriber.Type ~ day) + theme(plot.subtitle = element_text(vjust = 1), 
+    plot.caption = element_text(vjust = 1), 
+    panel.background = element_rect(fill = "lemonchiffon1")) +labs(x = "Hour_of_the_day", y = "Bicycle_Trips")+ theme(axis.text.x = element_text(angle = 25)) 
+
+
+
+```
+
+
+
+Well it really didnt look only customers were travelling during ther weekend,there were many annual pass holders taking cycle rides too.Maybe I should have tried testing my hypothesis by checking if the cutomers were significantly different than those who travelled during the weekend to come to this conculsion in the first place.
+
+
+One point that we can talk about is during weekdays customers hardly made trips during the office peak hours and were seen during the noon to 5pm period.
+
+
+
+
+
+##Data Analysis 2-HeatMap-Within Cities
+
+```{r,echo=FALSE}
+##HeatMap Add a legend
+
+  
+  heater<-function(x){
+    
+    
+  heat_map<- final_trip_data %>%filter( landmark.x == x  & landmark_end == x) %>% group_by(Start.Station, End.Station) %>% select( Start.Station, End.Station)  %>%  count() %>% spread(.,key = End.Station, value=n)
+  
+  heat_map<-as.data.frame(heat_map)
+  row.names(heat_map)<-heat_map$Start.Station
+  
+  heat_map<-heat_map[,-c(1)]
+  
+  heat_map<-data.matrix(heat_map)
+  
+  heatmap(heat_map,Rowv = NA, Colv = NA, col = heat.colors(256),scale="column",margins = c(16,10),main = x)
+  
+  
+  }
+  
+heater(x="Mountain View")
+heater(x="San Francisco")
+heater(x="Palo Alto")
+heater(x="Redwood City")
+heater(x="San Jose")
+
+
+```
+
+
+
+In this section I considered looking into the bike rides within each city where bike operations were going on.There were 5 cities.The darker the colour in the heat map more the bike rides were made..A diagonal  line indicates Start and End Station were the same. We can notice in almost every city many people were actually using this service to go around and return to the same place.But Who were these people?
+
+
+
+##Visualizing most frequented stations in San Francisco
+
+```{r,fig.width=12, fig.height=10}
+
+
+
+
+a<-final_trip_data %>% select( Start.Station, End.Station, hour) %>% group_by(Start.Station, End.Station, hour) %>% count() %>% arrange(desc(n))
+
+
+kable(a[1:5,])
+
+
+ 
+trip_count<-final_trip_data  %>%  filter(landmark.x == "San Francisco" & landmark_end == "San Francisco") %>%  select(long_start, long_end, lat_end, lat_start, Trip.ID) %>% group_by(long_start, long_end, lat_end, lat_start) %>% count()
+
+
+
+stations<-final_station_data %>% filter(landmark=="San Francisco")
+
+col1<-c("#dddddd", "#20beff")
+
+ggplot(trip_count) + geom_segment(aes(x = long_start, xend = long_end, y = lat_start, yend = lat_end,  colour=n, alpha = n,size = n)) + geom_point(data = stations, aes(x = long, y = lat), size = 4) +
+     geom_text_repel(data=stations, aes(x = long, y=lat, label = name), size = 4)+ scale_colour_gradientn(colors=col1,  name= "Number of Trips") + theme(plot.subtitle = element_text(vjust = 1), 
+    plot.caption = element_text(vjust = 1), 
+    panel.background = element_rect(fill = "lemonchiffon1")) +labs(title = "San Francisco") + theme(plot.title = element_text(hjust = 0.5))
+
+rm(a)
+
+```
+
+
+I had been trying very hard to plot this on the map to actually make it cooler,but there is no way I could get it.To make this plot I used geom_segment which uses line segment to connect the points.Since the heatmap has been difficult to analyze for San Francisco,I created this one for it.
+
+The table showed the top 5 locations from and to where people travelled.Most rides have actually taken place between Ferry Building to  2nd Townsend,this is on the Embarcadero path.Below map can be useful to understand this.Please do Zoom to San Francisco.
+
+
+
+```{r}
+
+leaflet() %>% 
+  addTiles() %>% 
+  setView(-122.42, 37.78, zoom =9) %>% 
+  addMarkers(data=final_station_data,lng = ~ long, lat = ~ lat, popup = final_station_data$name)
+
+
+
+```
+
+
+
+
+##Data Analysis-Who were the people travelling back to same place?
+
+```{r,echo=FALSE}
+
+
+
+
+##Same Place Customer vs Subscriber
+
+final_trip_data %>% filter(Start.Station == End.Station & !is.na(landmark.x)) %>% group_by( Start.Station, End.Station, hour, Subscriber.Type, day, landmark.x) %>%
+  count() %>% arrange(desc(n))  %>%  ggplot(.,aes(landmark.x,n,fill = Subscriber.Type))+geom_col(position = "fill") + coord_flip() + theme_economist() + theme(axis.title = element_text(family = "serif", 
+    size = 12, face = "italic")) + labs(x = "landmark", y = "Proportion")
+
+
+```
+
+
+
+Coming back to our question who were these set of people using bikes to go around and come back. Most of them happened to be customers.I think they could be tourists or people running errands.Honestly a deeper analysis would be to look at the duration of their trips.
+
+
+
+
+##Data Analysis-Long Distance Travellers
+```{r,echo=FALSE}
+
+
+
+a1<-final_trip_data  %>%  select(Start.Station, End.Station, distance, Start.Date, End.Date, landmark.x, landmark_end, Subscriber.Type)  %>%  filter(distance>10) %>% ggplot(.,mapping=aes(distance, Start.Station)) + geom_point(aes(label = End.Station))+ theme(plot.subtitle = element_text(vjust = 1), 
+    plot.caption = element_text(vjust = 1), 
+    panel.background = element_rect(fill = "gray95")) +labs(title = "Distance Travelled >10 miles", x = "Distance") + theme(plot.title = element_text(vjust = 0.5))
+
+
+ggplotly(a1)
+
+```
+
+
+
+Apart from looking at people travelling withing cities,I wanted  to look at people who had travelled between cities, more than 10 miles.10 Miles and you are mostly out of any city.So when I looked at this data almost close to 90% of them who travelled more than 10 miles were customers.So in all travelling to the same place and travelling long in general would be a customer.
+
+Can be an interesting classifier problem where we can predict who would be using the bike given these parameters.I have created a plotly,because I was unable to create a secondary Y axis on the plot to show the end station.
+
+
+
+
+
+
+##Tempeature and its effect on bike ride
+```{r,echo=FALSE}
+
+
+d$value<-as.Date(d$value)
+
+
+j<-final_trip_data %>% group_by(Start.Date) %>% count() %>% merge(.,d,by.x ="Start.Date",by.y="value",all=F) %>% select(`Mean Temperature`,`Wind Speed`,n,Events,`Dew Point`)
+j$`Mean Temperature`<-str_trim(str_replace_all(j$`Mean Temperature`,"°F", ""))
+
+
+j$`Dew Point`<-str_trim(str_replace_all(j$`Dew Point`,"°F", ""))
+j$`Mean Temperature` <-as.numeric(j$`Mean Temperature`)
+
+View(j)
+
+##Temperature
+  
+ggplot(j,mapping=aes(`Mean Temperature`,n))+geom_col()+scale_fill_brewer(palette = "Blues") + theme(plot.subtitle = element_text(vjust = 1), 
+    plot.caption = element_text(vjust = 1), 
+    panel.background = element_rect(fill = "lemonchiffon1")) +labs(title = "Count of trips across different temperature", 
+    y = "Bicycle_Trips") + theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+
+I merged the final trip data and the weather data to get the metrics required. 
+
+Suprisingly I had earlier thought that with increase in temperature, people would use bikes.But the plot is sort of normally distributed.People preffered temperature around 50-70 farenheit to ride their bikes.People stopped using the bikes at high and low temperatures.
+
+
+
+
+
+##Event and Bike Ride
+```{r,echo=FALSE}
+
+
+
+ j %>% ggplot(.,aes(Events,n,fill=Events)) +geom_col()+ theme(plot.subtitle = element_text(vjust = 1), 
+    plot.caption = element_text(vjust = 1), 
+    axis.text.x = element_text(angle = 25))+labs(y = "Count_Bicycle_Trips")+labs(title = "Count of trips across Events")
+
+
+
+
+```
+
+
+An Event here corresponds to Rain,Fog or Thunderstrom.I  tried seeing the trips made across on the particular day with a corresponding event.On any non-event day the bike rides were the highest.A thunderstorm saw a significant dip in the number of trips that were made,so did Fog and Rain.Rain/Thunderstorm is another category indicating it both occured on the same day which I did not want to change.
+
+
+
+
+
+
+##Shiny App
+
+```{r,echo=FALSE}
+
+
+
+ui<-fluidPage(
+  titlePanel(title = "",windowTitle = "Bay area Bike Share"),
+  leafletOutput("leaf", width = "100%",height =400),
+  wellPanel(fixedRow(
+    column(10,h3(textOutput("update"))),
+    column(2,actionButton("refresh","Refresh Data"))
+  ))
+)
+
+
+
+
+server<-function(input, output, session) {
+  
+  url1<-"http://feeds.bayareabikeshare.com/stations/stations.json"
+  
+  live_data<-fromJSON(url1)
+  
+  live_data_stations<-live_data$stationBeanList
+  
+  
+  time <- as.POSIXct(live_data$executionTime,tz="America/Los_Angeles",format="%Y-%m-%d %H:%M:%S")
+  output$update <- renderText({
+    paste0("Update Timestamp: ",as.character(time))
+  })
+  
+  
+  
+  htmlGen <- function(shape){
+    html <- paste0("<b>",shape$stationName,"</b><br>",
+                  "Bikes Available: ",shape$availableBikes,"<br>",
+                  "Docks Available: ",shape$availableDocks
+    )
+  }
+  
+  output$leaf <- renderLeaflet({
+    map <- leaflet()%>%
+      setView(-122.4194, 37.7749, zoom = 13) %>%
+      addProviderTiles("Stamen.TonerLite") 
+  })
+  
+  proxy <- leafletProxy("leaf",data = live_data_stations) %>% addMarkers(popup = htmlGen(live_data_stations))
+  
+  observeEvent(input$refresh,{
+    
+    url1<-"http://feeds.bayareabikeshare.com/stations/stations.json"
+    live_data<-fromJSON(url1)
+    time <- as.POSIXct(live_data$executionTime,tz="America/Los_Angeles",format="%Y-%m-%d %H:%M:%S")
+    
+    output$update <- renderText({
+      paste0("Update Timestamp: ",as.character(time))
+    })
+    stations <- (live_data$stationBeanList)
+    proxy <- leafletProxy("leaf",data = stations) %>% addMarkers(popup = htmlGen(stations))
+  })
+  
+  
+}
+shinyApp(ui=ui, server = server)
+
+
+
+
+```
+
+
+
+
+
+I had been working very hard on an app to connect places using leaflet map.Since that was very difficult to MAP,so I thought on the lines of using live data i.e the bay are bike sharing website contains information on stations and bike available which keeps getting updated in 10-20 seconds.The information is in JSON format that I utilized.To being with I had plotted the leaflet and was able to supply the bike information.
+
+I was unable to show bike information as a popup when clicked on each station. I tried looking this online because it was tricky. I found "https://github.com/bpb824/prontoBikes/blob/master/server.R" who had one this.I have used his html popup idea and updating idea.So a lot of credit to him.
+
+
+##Conclusion
+
+There were several things I look forward to add to make this more complete.Another shiny app where I can add an input calendar,which would tell me on any day, how bike rides varied during each hour.Will give a detailed explanation on how an event - Rain or Fog changed the trend.
+
+Also I want to regress weather metrics on bicycle trips made to find out and explain some of the significant variables,apart from visualizing it.
+
+But I thoroughly enjoyed working on it, so much data makes you want to do more analysis.I want to make more improvements to this and find much deeper patterns.I don't intend to keep this as a project for coursework.
+
