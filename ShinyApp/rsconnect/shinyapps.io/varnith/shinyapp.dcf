@@ -1,0 +1,10 @@
+name: shinyapp
+title:
+username:
+account: varnith
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 246732
+bundleId: 1126343
+url: https://varnith.shinyapps.io/shinyapp/
+when: 1512923747.13191

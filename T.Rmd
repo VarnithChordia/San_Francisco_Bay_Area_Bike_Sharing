@@ -1,0 +1,195 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+
+```{r}
+
+
+install.packages("leaflet")
+library(leaflet)
+library(dplyr)
+library(ggmap)
+library(purrr)
+library(magick)
+library(tidyr)
+library(NbClust)
+Clustering<-read.csv("E:/Rutgers/Semester3/Datamining/Project/Data/201608_201509_Avg_status_data.csv",stringsAsFactors = T)
+
+
+# st<-Clustering %>% filter(time_date=='01-09-2015')
+# 
+# str(st)
+# s<-spread(st[,c("station_id","time_hour","ratio_availability")],time_hour,ratio_availability)
+#
+# clusters <- NbClust(s, min.nc=2, max.nc=15,method = "kmeans")
+# 
+# a<-kmeans(s$ratio_availability,k)
+
+
+
+
+
+t<-c(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23)
+
+for (i in 1:length(t)){
+if (i==1){
+  
+  s<-Clustering %>% filter(time_date=='01-09-2015' & time_hour==t[1])
+  a<-kmeans(s$ratio_availability,3)
+  
+  j<-data.frame(a$centers)
+  colnames(j)[1]<-"Center"
+  j<-j %>% mutate(cluster=rownames(a$centers)) %>% arrange(Center)
+  k<-c("Low-Availability","Self-Balancing","High-Availability")
+  l<-as.data.frame(cbind(j,k))
+  l$cluster<-as.numeric(l$cluster)
+  
+  s<-cbind(s,a$cluster)
+  names(s)[6]<-"cluster"
+  
+  s<-s %>% left_join(.,l,by=c("cluster")) 
+  
+  }
+else {
+  
+  st<-Clustering %>% filter(time_date=='01-09-2015' & time_hour==t[i])
+  a<-kmeans(st$ratio_availability,3)
+  
+  j<-data.frame(a$centers)
+  colnames(j)[1]<-"Center"
+  j<-j %>% mutate(cluster=rownames(a$centers)) %>% arrange(Center)
+  k<-c("Low-Availability","Self-Balancing","High-Availability")
+  l<-as.data.frame(cbind(j,k))
+  l$cluster<-as.numeric(l$cluster)
+
+
+  st<-cbind(st,a$cluster)
+  names(st)[6]<-"cluster"
+  
+  st<-st %>% left_join(.,l,by=c("cluster"))  
+  
+  s<-rbind(s,st)
+  
+  
+  
+}
+
+
+}
+
+
+names(s)[8]<-"Availability"
+
+s$time_hour<-as.factor(s$time_hour)
+
+str(s)
+
+
+
+s %>% group_by(time_hour,cluster,Availability) %>% summarise(minimum=min(ratio_availability),maximum=max(ratio_availability))
+
+
+# 
+# pal <- colorFactor(c("green", "red","blue"), domain = c("High-Availability", "Low-Availability","Self-Balancing"))
+# 
+
+station<-read.csv("D:/Temp/Data/201608_station_data.csv",stringsAsFactors = T)
+
+
+s<-s %>% left_join(.,station,by=c("station_id"))
+
+s<-na.omit(s)
+
+```
+
+
+
+```{r}
+
+ca <- get_map(
+  c(lon=-122.410,lat=37.7849),
+  zoom=14,crop=T,
+  scale="auto",color="bw",source="google",
+  maptype="roadmap") 
+
+gg <- ggmap(ca, extent='panel',padding=0) 
+
+cols <- c("High-Availability" = "green", "Low-Availability" = "red", "Self-Balancing" = "blue")
+
+
+setwd("D:/Temp/Visualizations/Gif/")
+
+
+ndwi_map <- function(hour){
+  
+  gg + geom_point(data=s[s$time_hour==hour,], 
+                        aes(x=long, y=lat, fill=Availability),
+                  show.legend=T, pch=21, size=4.8, color="gray30")+ 
+    theme_bw() + ylab("Latitude") + xlab("Longitude") +
+    theme(axis.text.x = element_text(angle = 60, vjust=0.15, size=8),
+          legend.position=c(1,1),legend.justification=c(1,1),
+          legend.direction="vertical",legend.text=element_text(size=8),
+          legend.title=element_text(size=8, face="bold"),
+          legend.box="horizontal", panel.background = element_blank(),
+          legend.box.just = c("top"), 
+          legend.background = element_rect(fill=alpha('white', 0.6), colour = "gray30")) +
+    scale_fill_manual(values = cols)+
+    facet_wrap(~time_hour, ncol = 1)
+    print(paste0("saving plot ", hour))
+    ggsave(filename = paste0("./hgm_ndwi_",hour,".png"),
+           width = 8,height=8,dpi = 150)
+}
+
+
+
+seq(from = 0, to=23, by=1) %>% 
+  map_df(ndwi_map)
+
+
+
+
+t=file.info(list.files(path = "D:/Temp/Visualizations/Gif/", pattern = "*.png", full.names = T))
+
+t<-t[with(t, order(as.POSIXct(mtime))), ]
+
+file_list<-rownames(t)
+
+
+file_list %>% 
+  map(image_read) %>% 
+  image_join() %>% 
+  image_animate(fps=1) %>% 
+  image_write("D:/Temp/Visualizations/Gif/ndwi_aug_hgm_1.gif")
+
+# 
+# 
+# 
+# str(data_status_201608)
+# 
+# a<-data_status_201608  %>% group_by(Start.Station,End.Station) %>% summarise(trips_made=n()) %>% arrange(desc(trips_made)) 
+# data_status_201608  %>% group_by(Zip.Code) %>% summarise(trips_made=n()) %>% arrange(desc(trips_made))
+# 
+# 
+# 
+
+# 
+# install.packages("circlize")
+# 
+# devtools::install_github("mattflor/chorddiag")
+# 
+# library(chorddiag)
+# 
+# groupColors <- c("#000000", "#FFDD89", "#957244", "#F26223")
+# 
+# chorddiag(m, groupColors = groupColors, groupnamePadding = 20)
+# 
+# 
+# table(data_status_201608$Zip.Code)
+# 
+# View(data_status_201608)
+
+```
+
